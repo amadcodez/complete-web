@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import PasswordStrengthBar from "react-password-strength-bar";
+import { parsePhoneNumberFromString } from "libphonenumber-js";
 
 interface UserData {
   firstName: string;
@@ -12,7 +13,15 @@ interface UserData {
   profilePicture?: string | null;
 }
 
-const sanitizeInput = (input: any): string => {
+// 1) Helper to parse & validate phone (full international format only)
+function isValidPhoneNumber(phone: string): boolean {
+  const trimmed = phone.trim();
+  const phoneNumber = parsePhoneNumberFromString(trimmed);
+  return phoneNumber ? phoneNumber.isValid() : false;
+}
+
+// 2) Helper to sanitize user input
+const sanitizeInput = (input: string): string => {
   const inputFilteredTrim = input.trim();
   return inputFilteredTrim
     .replace(/&/g, "&amp;")
@@ -23,8 +32,20 @@ const sanitizeInput = (input: any): string => {
     .replace(/\\/g, "");
 };
 
+// 3) Email regex for common providers
 const emailRegex = /^(\w+)([\.-]?\w+)*@(gmail\.com|yahoo\.com|hotmail\.com|outlook\.com|live\.com)$/i;
-const nameRegex = /^[A-Za-z]+$/;
+
+// 4) Name regexes allow spaces & limit length
+const firstNameRegex = /^[A-Za-z\s]{1,50}$/;
+const lastNameRegex = /^[A-Za-z\s]{1,50}$/;
+
+// 5) Password must be 6–10 chars, contain letters, digits, and special chars
+//    Explanation: 
+//      - (?=.*[A-Za-z])   -> at least one letter
+//      - (?=.*\d)         -> at least one digit
+//      - (?=.*[^A-Za-z0-9])-> at least one special character
+//      - .{6,10}          -> overall length from 6 to 10
+const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{6,10}$/;
 
 export default function Register() {
   const [firstName, setFirstName] = useState("");
@@ -35,8 +56,8 @@ export default function Register() {
   const [contact, setContact] = useState("");
   const [profilePicture, setProfilePicture] = useState<string | null>(null);
   const [generalError, setGeneralError] = useState("");
-  const [recaptchaVerified, setRecaptchaVerified] = useState(false);
 
+  // Handle profile picture uploads
   const handleProfilePictureUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -48,44 +69,66 @@ export default function Register() {
     reader.readAsDataURL(file);
   };
 
-  const handleRecaptchaVerify = () => {
-    setRecaptchaVerified(true);
-    alert("ReCAPTCHA verified successfully!");
-  };
-
+  // Handle form submission
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setGeneralError("");
 
-    if (!recaptchaVerified) {
-      setGeneralError("Please complete the ReCAPTCHA verification.");
+    // 1) Validate first name
+    if (!firstNameRegex.test(firstName)) {
+      setGeneralError("First Name must be 1–50 letters/spaces (no digits or symbols).");
       return;
     }
 
-    if (!nameRegex.test(firstName) || !nameRegex.test(lastName)) {
-      setGeneralError("First Name and Last Name must contain only letters.");
+    // 2) Validate last name (optional)
+    if (lastName.trim() && !lastNameRegex.test(lastName)) {
+      setGeneralError("Last Name can only have letters/spaces (max 50 characters).");
       return;
     }
 
+    // 3) Validate email format & allowed domains
     if (!emailRegex.test(email)) {
-      setGeneralError("Email must be from Gmail, Yahoo, Hotmail, Outlook, or Live.");
+      setGeneralError(
+        "Email must be from Gmail, Yahoo, Hotmail, Outlook, or Live (e.g., user@gmail.com)."
+      );
       return;
     }
 
+    // 4) Validate password with the new passwordRegex
+    if (!passwordRegex.test(password)) {
+      setGeneralError(
+        "Password must be 6–10 characters long and include at least one letter, one digit, and one special character."
+      );
+      return;
+    }
+
+    // 5) Validate password match
     if (password !== confirmPassword) {
       setGeneralError("Passwords do not match!");
       return;
     }
 
+    // 6) Validate contact (optional) - must be full international format if entered
+    if (contact.trim()) {
+      if (!isValidPhoneNumber(contact.trim())) {
+        setGeneralError(
+          "Please provide a valid phone number in full international format (e.g. +16466698002)."
+        );
+        return;
+      }
+    }
+
+    // 7) Prepare data for submission
     const userData: UserData = {
       firstName: sanitizeInput(firstName),
       lastName: sanitizeInput(lastName),
       email: sanitizeInput(email),
-      password,
+      password, // typically hashed on the server
       contact: sanitizeInput(contact),
       profilePicture,
     };
 
+    // 8) Submit to the server
     try {
       const response = await fetch("/api/register", {
         method: "POST",
@@ -116,20 +159,94 @@ export default function Register() {
       <div className="w-full max-w-md bg-[#ecfbf4] p-6 rounded-lg shadow-md">
         <form onSubmit={handleSubmit} className="space-y-4">
           <h2 className="text-center text-2xl font-bold">Create Account</h2>
-          {generalError && <p className="text-red-500 text-xs text-center">{generalError}</p>}
-          <input type="text" placeholder="First Name" value={firstName} onChange={(e) => setFirstName(e.target.value)} required className="w-full p-2 border rounded" />
-          <input type="text" placeholder="Last Name" value={lastName} onChange={(e) => setLastName(e.target.value)} required className="w-full p-2 border rounded" />
-          <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required className="w-full p-2 border rounded" />
-          <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required className="w-full p-2 border rounded" />
+
+          {generalError && (
+            <p className="text-red-500 text-xs text-center">{generalError}</p>
+          )}
+
+          <input
+            type="text"
+            placeholder="First Name"
+            value={firstName}
+            onChange={(e) => setFirstName(e.target.value)}
+            className="w-full p-2 border rounded"
+            required
+          />
+
+          <input
+            type="text"
+            placeholder="Last Name (Optional)"
+            value={lastName}
+            onChange={(e) => setLastName(e.target.value)}
+            className="w-full p-2 border rounded"
+          />
+
+          <input
+            type="email"
+            placeholder="Email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full p-2 border rounded"
+            required
+          />
+
+          <input
+            type="password"
+            placeholder="Password (6-10 chars)"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="w-full p-2 border rounded"
+            required
+          />
+
+          {/* PASSWORD STRENGTH METER (optional, still shows) */}
           <PasswordStrengthBar password={password} />
-          <input type="password" placeholder="Confirm Password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required className="w-full p-2 border rounded" />
-          <input type="text" placeholder="Contact (Optional)" value={contact} onChange={(e) => setContact(e.target.value)} className="w-full p-2 border rounded" />
-          <input type="file" accept="image/*" onChange={handleProfilePictureUpload} className="w-full p-2" />
-          {profilePicture && <img src={profilePicture} alt="Profile Preview" className="mt-2 w-24 h-24 rounded-full object-cover mx-auto" />}
-          <button type="button" onClick={handleRecaptchaVerify} className="bg-blue-500 text-white py-2 px-4 rounded w-full">Verify ReCAPTCHA</button>
-          <button type="submit" className="bg-green-500 text-white py-2 px-4 rounded w-full">Register</button>
+
+          <input
+            type="password"
+            placeholder="Confirm Password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            className="w-full p-2 border rounded"
+            required
+          />
+
+          <input
+            type="text"
+            placeholder="Contact (Optional)"
+            value={contact}
+            onChange={(e) => setContact(e.target.value)}
+            className="w-full p-2 border rounded"
+          />
+
+          <input
+            type="file"
+            accept="image/*"
+            onChange={handleProfilePictureUpload}
+            className="w-full p-2"
+          />
+          {profilePicture && (
+            <img
+              src={profilePicture}
+              alt="Profile Preview"
+              className="mt-2 w-24 h-24 rounded-full object-cover mx-auto"
+            />
+          )}
+
+          <button
+            type="submit"
+            className="bg-green-500 text-white py-2 px-4 rounded w-full"
+          >
+            Register
+          </button>
         </form>
-        <p className="text-center text-sm mt-4">Already have an account? <a href="/Login" className="text-blue-500 hover:underline">Login</a></p>
+
+        <p className="text-center text-sm mt-4">
+          Already have an account?{" "}
+          <a href="/Login" className="text-blue-500 hover:underline">
+            Login
+          </a>
+        </p>
       </div>
     </div>
   );
