@@ -4,7 +4,7 @@ export default function Navbar() {
       <div className="container mx-auto flex items-center justify-between py-4 px-6">
         {/* Logo */}
         <div className="text-xl font-bold">
-          <a href="/">Multi-Vendor</a>
+          <a href="/">COVO</a>
         </div>
         {/* Links */}
         <div className="hidden md:flex space-x-6">
